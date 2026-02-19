@@ -3,10 +3,12 @@ package org.example.backend.domain.registration.service;
 import lombok.RequiredArgsConstructor;
 import org.example.backend.domain.course.entity.Course;
 import org.example.backend.domain.course.repository.CourseRepository;
+import org.example.backend.domain.registration.dto.EnrollResult;
 import org.example.backend.domain.registration.dto.EnrolledStudentResponse;
 import org.example.backend.domain.registration.dto.EnrollmentResponse;
 import org.example.backend.domain.registration.entity.Registration;
 import org.example.backend.domain.registration.repository.RegistrationRepository;
+import org.example.backend.domain.registration.service.WaitingQueueService.WaitingPosition;
 import org.example.backend.domain.student.entity.Student;
 import org.example.backend.domain.student.repository.StudentRepository;
 import org.example.backend.domain.professor.entity.Professor;
@@ -29,10 +31,11 @@ public class EnrollmentService {
     private final CourseRepository courseRepository;
     private final StudentRepository studentRepository;
     private final ProfessorRepository professorRepository;
+    private final WaitingQueueService waitingQueueService;
 
-    /** [Student] 수강신청 실행 (동시성 제어: 정원·중복·학점 검증) */
+    /** [Student] 수강신청 실행. 정원 마감 시 대기열 등록. */
     @Transactional
-    public EnrollmentResponse enroll(Long studentUserId, Long courseId) {
+    public EnrollResult enroll(Long studentUserId, Long courseId) {
         Student student = studentRepository.findByUserId(studentUserId)
                 .orElseThrow(() -> new IllegalArgumentException("학생 정보를 찾을 수 없습니다."));
 
@@ -43,15 +46,17 @@ public class EnrollmentService {
         Course course = courseRepository.findByIdForUpdate(courseId)
                 .orElseThrow(() -> new IllegalArgumentException("강의를 찾을 수 없습니다."));
 
-        if (course.getCurrentEnrollment() >= course.getCapacity()) {
-            throw new IllegalArgumentException("수강 정원이 마감되었습니다.");
-        }
         if (!course.getTargetGrade().equals(student.getGrade())) {
             throw new IllegalArgumentException("대상 학년이 아닙니다.");
         }
         int afterCredits = student.getCurrentCredits() + course.getCredit();
         if (afterCredits > student.getMaxCredits()) {
             throw new IllegalArgumentException("신청 가능한 최대 학점을 초과합니다.");
+        }
+
+        if (course.getCurrentEnrollment() >= course.getCapacity()) {
+            long position = waitingQueueService.addToQueue(courseId, studentUserId);
+            return EnrollResult.waitlist(position);
         }
 
         Registration reg = Registration.builder()
@@ -67,10 +72,10 @@ public class EnrollmentService {
         student.setCurrentCredits(student.getCurrentCredits() + course.getCredit());
         studentRepository.save(student);
 
-        return toEnrollmentResponse(reg);
+        return EnrollResult.enrolled(toEnrollmentResponse(reg));
     }
 
-    /** [Student] 수강신청 취소 */
+    /** [Student] 수강신청 취소. 대기열 1명 자동 배정 시도. */
     @Transactional
     public void cancel(Long studentUserId, Long courseId) {
         Student student = studentRepository.findByUserId(studentUserId)
@@ -87,6 +92,24 @@ public class EnrollmentService {
         studentRepository.save(student);
 
         registrationRepository.delete(reg);
+
+        Long nextUserId = waitingQueueService.popNext(courseId);
+        if (nextUserId != null) {
+            try {
+                enroll(nextUserId, courseId);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** [Student] 내 대기열 순번 목록 */
+    public List<WaitingPosition> getMyWaitingPositions(Long studentUserId) {
+        return waitingQueueService.getMyWaitingPositions(studentUserId);
+    }
+
+    /** [Student] 대기열 포기 */
+    public void leaveWaitingQueue(Long studentUserId, Long courseId) {
+        waitingQueueService.removeFromQueue(courseId, studentUserId);
     }
 
     /** [Student] 내가 신청한 수강 내역 조회 (시간표 확인용) */

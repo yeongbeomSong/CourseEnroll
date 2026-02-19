@@ -45,7 +45,7 @@ export const adminDepartmentsApi = {
   delete: (id) => request(`/admin/departments/${id}`, { method: 'DELETE' }),
 };
 
-// Courses (학생: 목록/신청)
+// Courses (학생: 목록/신청/대기열)
 export const coursesApi = {
   list: async (params) => {
     const clean = Object.fromEntries(
@@ -59,6 +59,8 @@ export const coursesApi = {
   apply: (id) => request('/enrollments', { method: 'POST', body: JSON.stringify({ courseId: id }) }),
   cancel: (id) => request(`/enrollments/${id}`, { method: 'DELETE' }),
   myEnrollments: () => request('/enrollments/me'),
+  waitingPositions: () => request('/enrollments/waiting').then((r) => r?.positions ?? []),
+  leaveWaiting: (courseId) => request(`/enrollments/waiting/${courseId}`, { method: 'DELETE' }),
 };
 
 // Professor - Courses (백엔드 경로: /api/professors/courses)

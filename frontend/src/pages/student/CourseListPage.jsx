@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Layout } from '../../components/Layout';
 import { coursesApi, departmentsApi } from '../../lib/api';
-import { Filter, BookOpen, UserCheck, Loader2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Filter, BookOpen, UserCheck, Loader2, CheckCircle, XCircle, AlertCircle, Clock, UserX } from 'lucide-react';
 
 const REFETCH_INTERVAL = 10000; // 실시간 잔여석 갱신 10초
 
@@ -27,7 +27,13 @@ export function CourseListPage() {
     queryFn: coursesApi.myEnrollments,
   });
 
+  const { data: waitingPositions = [] } = useQuery({
+    queryKey: ['waitingPositions'],
+    queryFn: coursesApi.waitingPositions,
+  });
+
   const courseIds = new Set((myEnrollments || []).map((e) => e.courseId));
+  const waitingByCourse = Object.fromEntries((waitingPositions || []).map((p) => [p.courseId, p.position]));
   const courses = (Array.isArray(coursesRaw) ? coursesRaw : []).map((c) => ({
     ...c,
     name: c.title ?? c.name,
@@ -36,21 +42,32 @@ export function CourseListPage() {
     remainingSeats: (c.capacity ?? 0) - (c.currentEnrollment ?? c.enrolledCount ?? 0),
     creditType: c.category ?? c.creditType,
     enrolled: courseIds.has(c.id),
+    waitingPosition: waitingByCourse[c.id] ?? 0,
   }));
 
   const applyMutation = useMutation({
     mutationFn: (id) => coursesApi.apply(id),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['courses'] });
       queryClient.invalidateQueries({ queryKey: ['myEnrollments'] });
+      queryClient.invalidateQueries({ queryKey: ['waitingPositions'] });
+      if (result?.inWaitlist && result?.waitingPosition) {
+        alert(`대기열 ${result.waitingPosition}번째로 등록되었습니다. 취소 시 순번대로 자동 배정됩니다.`);
+      }
+    },
+  });
+
+  const leaveWaitingMutation = useMutation({
+    mutationFn: (courseId) => coursesApi.leaveWaiting(courseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['waitingPositions'] });
+      queryClient.invalidateQueries({ queryKey: ['courses'] });
     },
   });
 
   const handleApply = (course) => {
     if (course.enrolled) return;
-    if (course.remainingSeats <= 0) return;
     applyMutation.mutate(course.id, {
-      onSuccess: () => {},
       onError: (err) => {
         alert(err.data?.message || err.message || '신청에 실패했습니다.');
       },
@@ -128,15 +145,35 @@ export function CourseListPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   {course.enrolled ? (
                     <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm">
                       <CheckCircle className="w-4 h-4" /> 신청됨
                     </span>
+                  ) : course.waitingPosition > 0 ? (
+                    <>
+                      <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800 text-sm">
+                        <Clock className="w-4 h-4" /> 대기 {course.waitingPosition}번째
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => leaveWaitingMutation.mutate(course.id)}
+                        disabled={leaveWaitingMutation.isPending}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm border border-slate-300 rounded-lg hover:bg-slate-50"
+                      >
+                        <UserX className="w-4 h-4" /> 대기열 포기
+                      </button>
+                    </>
                   ) : (course.remainingSeats ?? (course.capacity - (course.enrolledCount || 0))) <= 0 ? (
-                    <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-100 text-red-700 text-sm">
-                      <XCircle className="w-4 h-4" /> 정원 초과
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleApply(course)}
+                      disabled={applyMutation.isPending}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {applyMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                      대기열 신청
+                    </button>
                   ) : (
                     <button
                       type="button"

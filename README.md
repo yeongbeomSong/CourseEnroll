@@ -12,6 +12,7 @@
 | **Frontend** | React 19, Vite 7, React Router, React Query, Tailwind CSS, Lucide React |
 | **Backend** | Java 21, Spring Boot 3.4, Spring Security, JPA, JWT |
 | **DB** | H2 (파일 DB, 개발용) |
+| **대기열** | Redis (수강신청 정원 마감 시 대기열 등록·자동 배정) |
 
 ---
 
@@ -43,6 +44,7 @@ project/
 - **Node.js** 18+ (프론트엔드)
 - **Java** 21 (백엔드)
 - **Gradle** (또는 JDK에 포함된 wrapper 사용)
+- **Redis** (대기열 기능 사용 시, 기본 localhost:6379)
 
 ---
 
@@ -107,7 +109,7 @@ npm run dev
 ## 주요 기능
 
 - **공통**: 로그인, 회원가입(학생/교수), 403/404 페이지
-- **학생**: 강의 목록·필터·신청, 내 수강 시간표, 신청 취소, 마이페이지
+- **학생**: 강의 목록·필터·신청, **정원 마감 시 대기열 신청**, 대기 순번 조회·포기, 내 수강 시간표, 신청 취소, 마이페이지
 - **교수**: 내 강의 대시보드, 강의 등록/수정, 수강생 명단 조회
 - **관리자**: 학과 CRUD, 사용자 검색·삭제, 전체 강의 모니터링
 
