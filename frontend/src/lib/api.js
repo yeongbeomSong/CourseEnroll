@@ -61,6 +61,7 @@ export const coursesApi = {
   myEnrollments: () => request('/enrollments/me'),
   waitingPositions: () => request('/enrollments/waiting').then((r) => r?.positions ?? []),
   leaveWaiting: (courseId) => request(`/enrollments/waiting/${courseId}`, { method: 'DELETE' }),
+  enrollStatus: (courseId) => request(`/enrollments/status?courseId=${courseId}`),
 };
 
 // Professor - Courses (백엔드 경로: /api/professors/courses)

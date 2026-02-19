@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Layout } from '../../components/Layout';
 import { coursesApi, departmentsApi } from '../../lib/api';
-import { Filter, BookOpen, UserCheck, Loader2, CheckCircle, XCircle, AlertCircle, Clock, UserX } from 'lucide-react';
+import { Filter, BookOpen, UserCheck, Loader2, CheckCircle, AlertCircle, Clock, UserX } from 'lucide-react';
 
 const REFETCH_INTERVAL = 10000; // 실시간 잔여석 갱신 10초
+const POLL_INTERVAL = 1500;    // 신청 상태 폴링
 
 export function CourseListPage() {
   const [deptFilter, setDeptFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [pollingCourseId, setPollingCourseId] = useState(null);
   const queryClient = useQueryClient();
+  const pollRef = useRef(null);
 
   const { data: departments = [] } = useQuery({
     queryKey: ['departments'],
@@ -47,15 +50,44 @@ export function CourseListPage() {
 
   const applyMutation = useMutation({
     mutationFn: (id) => coursesApi.apply(id),
-    onSuccess: (result) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['courses'] });
       queryClient.invalidateQueries({ queryKey: ['myEnrollments'] });
       queryClient.invalidateQueries({ queryKey: ['waitingPositions'] });
-      if (result?.inWaitlist && result?.waitingPosition) {
-        alert(`대기열 ${result.waitingPosition}번째로 등록되었습니다. 취소 시 순번대로 자동 배정됩니다.`);
-      }
     },
   });
+
+  useEffect(() => {
+    if (pollingCourseId == null) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const st = await coursesApi.enrollStatus(pollingCourseId);
+        if (st?.status === 'enrolled' || st?.status === 'success') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setPollingCourseId(null);
+          queryClient.invalidateQueries({ queryKey: ['myEnrollments'] });
+          queryClient.invalidateQueries({ queryKey: ['waitingPositions'] });
+          queryClient.invalidateQueries({ queryKey: ['courses'] });
+          return;
+        }
+        if (st?.status === 'full' || st?.status === 'error') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setPollingCourseId(null);
+          queryClient.invalidateQueries({ queryKey: ['waitingPositions'] });
+          queryClient.invalidateQueries({ queryKey: ['courses'] });
+          alert(st?.status === 'full' ? '정원 마감으로 신청되지 않았습니다.' : '신청 처리에 실패했습니다.');
+          return;
+        }
+      } catch {
+        // keep polling
+      }
+    }, POLL_INTERVAL);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [pollingCourseId, queryClient]);
 
   const leaveWaitingMutation = useMutation({
     mutationFn: (courseId) => coursesApi.leaveWaiting(courseId),
@@ -68,6 +100,12 @@ export function CourseListPage() {
   const handleApply = (course) => {
     if (course.enrolled) return;
     applyMutation.mutate(course.id, {
+      onSuccess: (result) => {
+        const position = result?.waitingPosition ?? result?.position;
+        if (position != null) {
+          setPollingCourseId(course.id);
+        }
+      },
       onError: (err) => {
         alert(err.data?.message || err.message || '신청에 실패했습니다.');
       },
@@ -164,16 +202,6 @@ export function CourseListPage() {
                         <UserX className="w-4 h-4" /> 대기열 포기
                       </button>
                     </>
-                  ) : (course.remainingSeats ?? (course.capacity - (course.enrolledCount || 0))) <= 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => handleApply(course)}
-                      disabled={applyMutation.isPending}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50"
-                    >
-                      {applyMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
-                      대기열 신청
-                    </button>
                   ) : (
                     <button
                       type="button"
